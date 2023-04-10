@@ -37,7 +37,7 @@ class Store<T> {
     return (
       ...args: Parameters<MethodsOf<T>[M]>
     ): ReturnType<MethodsOf<T>[M]> => {
-      const result = selectedMethod.call(this.value, args);
+      const result = selectedMethod.call(this.value, ...args);
       this.emitChange();
       return result;
     };
@@ -129,6 +129,48 @@ describe("...", () => {
     unmount();
 
     expect(store["listeners"]).toHaveLength(0);
+  });
+
+  it("can call writes with parameters", async () => {
+    let ids = 0;
+
+    class Item {
+      public id = ++ids;
+      constructor(public name: string) {}
+      setName(newName: string) {
+        this.name = newName;
+      }
+    }
+    const state = new (class {
+      public list: Item[] = [new Item("one"), new Item("two")];
+      changeItemName(itemId: number, newName: string) {
+        this.list.find((item) => item.id === itemId)?.setName(newName);
+      }
+    })();
+    const store = new Store(state);
+
+    const C = () => {
+      const list = store.useRead((s) => s.list);
+      const changeItemName = store.useWrite((s) => s.changeItemName);
+      return (
+        <ul>
+          {list.map((item) => (
+            <li key={item.id}>
+              <span>{item.name}</span>
+              <button
+                onClick={() => changeItemName(item.id, "updated")}
+              ></button>
+            </li>
+          ))}
+        </ul>
+      );
+    };
+    const { findByText, getAllByRole } = render(<C />);
+
+    fireEvent.click(getAllByRole("button")[1]);
+
+    await findByText("one");
+    await findByText("updated");
   });
 });
 
