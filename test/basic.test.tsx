@@ -19,13 +19,16 @@ class Store<T> {
 
   useRead<R>(selector: (value: T) => R) {
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    const getter = useCallback(() => selector(this.value), [selector]);
+    const getter = useCallback(
+      () => ({ value: selector(this.value) }),
+      [selector]
+    );
     // eslint-disable-next-line react-hooks/rules-of-hooks
     const [state, setState] = useState(getter);
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useEffect(() => this.addListener(() => setState(getter)), [getter]);
 
-    return state;
+    return state.value;
   }
 
   useWrite<R extends MethodsOf<T>[keyof MethodsOf<T>]>(
@@ -168,6 +171,82 @@ describe("...", () => {
     await findByText("one");
     await findByText("updated");
   });
+
+  it("updates a mutable value", async () => {
+    const state = new (class {
+      public list = [1];
+      addOne() {
+        this.list.push(this.list.length + 1);
+      }
+    })();
+    const store = new Store(state);
+
+    const C = () => {
+      const list = store.useRead((s) => s.list);
+      const addOne = store.useWrite((s) => s.addOne);
+      return (
+        <>
+          <ul>
+            {list.map((n, i) => (
+              <li key={i}>{n}</li>
+            ))}
+          </ul>
+          <button onClick={addOne}>+</button>
+        </>
+      );
+    };
+    const { findAllByRole, getByRole } = render(<C />);
+
+    fireEvent.click(getByRole("button"));
+
+    const items = await findAllByRole("listitem");
+
+    expect(items).toHaveLength(2);
+  });
+
+  it("updates on mutable values cause nested components to rerender", async () => {
+    let ids = 0;
+
+    class Item {
+      public id = ++ids;
+      constructor(public name: string) {}
+      setName(newName: string) {
+        this.name = `${this.name} -> ${newName}`;
+      }
+    }
+    const state = new (class {
+      public list: Item[] = [new Item("one"), new Item("two")];
+      changeItemName(itemId: number, newName: string) {
+        this.list.find((item) => item.id === itemId)?.setName(newName);
+      }
+    })();
+    const store = new Store(state);
+
+    const ItemComp = ({ item }: { item: Item }) => <span>{item.name}</span>;
+    const C = () => {
+      const list = store.useRead((s) => s.list);
+      const changeItemName = store.useWrite((s) => s.changeItemName);
+      return (
+        <ul>
+          {list.map((item) => (
+            <li key={item.id}>
+              <ItemComp item={item} />
+              <button
+                onClick={() => changeItemName(item.id, "updated")}
+              ></button>
+            </li>
+          ))}
+        </ul>
+      );
+    };
+    const { findByText, getAllByRole } = render(<C />);
+
+    fireEvent.click(getAllByRole("button")[1]);
+
+    await findByText("one");
+    await findByText("two -> updated");
+  });
+});
 
 describe("types", () => {
   const state = new (class {
