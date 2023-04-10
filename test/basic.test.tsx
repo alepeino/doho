@@ -1,5 +1,6 @@
 import { fireEvent, render } from "@testing-library/react";
-import { useCallback, useEffect, useState } from "react";
+import { createElement, useCallback, useEffect, useState } from "react";
+import { expectType } from "ts-expect";
 
 type MethodsOf<T> = {
   [M in keyof T as T[M] extends (...args: unknown[]) => unknown
@@ -27,20 +28,15 @@ class Store<T> {
     return state;
   }
 
-  useWrite<M extends keyof MethodsOf<T>>(
-    selector: (value: MethodsOf<T>) => MethodsOf<T>[M]
-  ) {
-    const selectedMethod: MethodsOf<T>[M] = selector(
-      this.value as MethodsOf<T>
-    );
-
-    return (
-      ...args: Parameters<MethodsOf<T>[M]>
-    ): ReturnType<MethodsOf<T>[M]> => {
+  useWrite<R extends MethodsOf<T>[keyof MethodsOf<T>]>(
+    selector: (value: MethodsOf<T>) => R
+  ): R {
+    const selectedMethod = selector(this.value as MethodsOf<T>);
+    return ((...args) => {
       const result = selectedMethod.call(this.value, ...args);
       this.emitChange();
       return result;
-    };
+    }) as typeof selectedMethod;
   }
 
   private emitChange() {
@@ -171,6 +167,42 @@ describe("...", () => {
 
     await findByText("one");
     await findByText("updated");
+  });
+
+describe("types", () => {
+  const state = new (class {
+    public x = 1;
+    getX() {
+      return this.x;
+    }
+    setX(newX: number) {
+      this.x = newX;
+    }
+    inc() {
+      this.x++;
+    }
+  })();
+  const store = new Store(state);
+
+  it("useRead types should match those of selected value", () => {
+    render(
+      createElement(() => {
+        expectType<number>(store.useRead((s) => s.x));
+        expectType<number>(store.useRead((s) => s.getX()));
+        return null;
+      })
+    );
+  });
+
+  it("useWrite types should match those of selected value", () => {
+    render(
+      createElement(() => {
+        expectType<() => void>(store.useWrite((s) => s.inc));
+        expectType<() => number>(store.useWrite((s) => s.getX));
+        expectType<(n: number) => void>(store.useWrite((s) => s.setX));
+        return null;
+      })
+    );
   });
 });
 
